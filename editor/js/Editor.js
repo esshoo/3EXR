@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 
 import { Config } from './Config.js';
+import { AssetStore } from './AssetStore.js';
 import { Loader } from './Loader.js';
 import { History as _History } from './History.js';
 import { Strings } from './Strings.js';
@@ -106,6 +107,7 @@ function Editor() {
 	this.selector = new Selector( this );
 	this.storage = new _Storage();
 	this.strings = new Strings( this.config );
+	this.assetStore = new AssetStore();
 
 	this.loader = new Loader( this );
 
@@ -724,6 +726,8 @@ Editor.prototype = {
 		this.materials = {};
 		this.textures = {};
 		this.scripts = {};
+
+		this.assetStore.clear();
 
 		this.materialsRefCounter.clear();
 

@@ -294,9 +294,12 @@ function MenubarFile( editor ) {
 	const fileInput = document.createElement( 'input' );
 	fileInput.multiple = true;
 	fileInput.type = 'file';
-	fileInput.addEventListener( 'change', function () {
+	fileInput.addEventListener( 'change', async function () {
 
-		editor.loader.loadFiles( fileInput.files );
+		const files = Array.from( fileInput.files );
+
+		await editor.loader.loadFiles( files );
+
 		form.reset();
 
 	} );

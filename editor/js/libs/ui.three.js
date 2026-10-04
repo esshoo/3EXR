@@ -48,6 +48,18 @@ class UITexture extends UISpan {
 
 		async function loadFile( file ) {
 
+			if ( ! file ) return;
+
+			try {
+
+				await editor.assetStore.registerFile( file, file.name );
+
+			} catch ( error ) {
+
+				console.warn( '3EXR AssetStore: unable to register texture.', error );
+
+			}
+
 			const extension = file.name.split( '.' ).pop().toLowerCase();
 			const reader = new FileReader();
 

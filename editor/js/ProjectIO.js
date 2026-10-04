@@ -89,6 +89,9 @@ title.trim() !== ''
 
 		const now = new Date().toISOString();
 
+		const assetEntries = this.editor.assetStore.getManifestEntries();
+		const assetStats = this.editor.assetStore.getStats();
+
 		if ( this.createdAt === null ) {
 
 			this.createdAt = now;
@@ -119,7 +122,9 @@ title.trim() !== ''
 
 			assets: {
 				version: 1,
-				entries: []
+				count: assetStats.count,
+				totalSize: assetStats.totalSize,
+				entries: assetEntries
 			}
 
 		};
@@ -131,7 +136,7 @@ title.trim() !== ''
 		const manifest = this.createManifest();
 		const editorData = this.editor.toJSON();
 
-		return zipSync( {
+		const packageFiles = {
 
 			'manifest.json': strToU8(
 				JSON.stringify( manifest, null, 2 )
@@ -141,9 +146,30 @@ title.trim() !== ''
 				JSON.stringify( editorData, null, 2 )
 			)
 
-		}, {
-			level: 6
-		} );
+		};
+
+		Object.assign(
+			packageFiles,
+			this.editor.assetStore.getPackageFiles()
+		);
+
+		const stats = this.editor.assetStore.getStats();
+
+		console.log(
+			'3EXR Project:',
+			'packaging',
+			stats.count,
+			'assets,',
+			stats.totalSize,
+			'bytes'
+		);
+
+		return zipSync(
+			packageFiles,
+			{
+				level: 6
+			}
+		);
 
 	}
 
@@ -304,6 +330,11 @@ manifest.formatVersion > FORMAT_VERSION
 		);
 
 		this.editor.clear();
+
+		this.editor.assetStore.restoreFromPackage(
+			manifest.assets?.entries || [],
+			zip
+		);
 
 		await this.editor.fromJSON(
 			editorData
