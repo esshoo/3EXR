@@ -1,10 +1,10 @@
 function Config() {
 
-	const name = 'threejs-editor';
+	const name = '3exr-editor';
 
 	const userLanguage = navigator.language.split( '-' )[ 0 ];
 
-	const suggestedLanguage = [ 'fr', 'ja', 'zh', 'ko', 'fa' ].includes( userLanguage ) ? userLanguage : 'en';
+	const suggestedLanguage = [ 'ar', 'fr', 'ja', 'zh', 'ko', 'fa' ].includes( userLanguage ) ? userLanguage : 'ar';
 
 	const storage = {
 		'language': suggestedLanguage,
