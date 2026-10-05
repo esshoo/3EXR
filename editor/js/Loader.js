@@ -174,6 +174,215 @@ function Loader( editor ) {
 
 	};
 
+	function getGLTFTextureSourceIndex( textureDef ) {
+
+		if ( ! textureDef ) return null;
+
+		const extensions =
+			textureDef.extensions || {};
+
+		if (
+			extensions.KHR_texture_basisu?.source !== undefined
+		) {
+
+			return extensions.KHR_texture_basisu.source;
+
+		}
+
+		if (
+			extensions.EXT_texture_avif?.source !== undefined
+		) {
+
+			return extensions.EXT_texture_avif.source;
+
+		}
+
+		if (
+			extensions.EXT_texture_webp?.source !== undefined
+		) {
+
+			return extensions.EXT_texture_webp.source;
+
+		}
+
+		return textureDef.source ?? null;
+
+	}
+
+	function collectMaterialTextures( material, textures ) {
+
+		if ( ! material ) return;
+
+		const materials = Array.isArray( material )
+			? material
+			: [ material ];
+
+		for ( const item of materials ) {
+
+			if ( ! item ) continue;
+
+			for ( const value of Object.values( item ) ) {
+
+				if (
+					value &&
+					value.isTexture === true
+				) {
+
+					textures.add( value );
+
+				}
+
+			}
+
+		}
+
+	}
+
+	function linkGLTFTextures( result, modelAssetId = null ) {
+
+		const parser = result?.parser;
+		const json = parser?.json;
+
+		if (
+			! parser ||
+			! parser.associations ||
+			! json
+		) {
+
+			return 0;
+
+		}
+
+		const textures = new Set();
+
+		const scenes =
+			Array.isArray( result.scenes ) &&
+			result.scenes.length > 0
+				? result.scenes
+				: [ result.scene ];
+
+		for ( const scene of scenes ) {
+
+			if (
+				! scene ||
+				typeof scene.traverse !== 'function'
+			) {
+
+				continue;
+
+			}
+
+			scene.traverse( function ( object ) {
+
+				collectMaterialTextures(
+					object.material,
+					textures
+				);
+
+			} );
+
+		}
+
+		let linked = 0;
+
+		for ( const texture of textures ) {
+
+			const association =
+				parser.associations.get( texture );
+
+			const textureIndex =
+				association?.textures;
+
+			if (
+				typeof textureIndex !== 'number'
+			) {
+
+				continue;
+
+			}
+
+			const textureDef =
+				json.textures?.[ textureIndex ];
+
+			const imageIndex =
+				getGLTFTextureSourceIndex(
+					textureDef
+				);
+
+			if (
+				typeof imageIndex !== 'number'
+			) {
+
+				continue;
+
+			}
+
+			const imageDef =
+				json.images?.[ imageIndex ];
+
+			if ( ! imageDef ) continue;
+
+			const uri =
+				typeof imageDef.uri === 'string'
+					? imageDef.uri
+					: null;
+
+			const externalURI =
+				uri !== null &&
+				! uri.startsWith( 'data:' );
+
+			const imageAssetId =
+				externalURI
+					? editor.assetStore.findBySourcePath( uri )
+					: null;
+
+			const linkedAssetId =
+				imageAssetId ||
+				modelAssetId;
+
+			if ( ! linkedAssetId ) continue;
+
+			if (
+				editor.assetStore.linkTexture(
+					texture,
+					linkedAssetId
+				) === false
+			) {
+
+				continue;
+
+			}
+
+			texture.userData.__3exr.gltf = {
+				textureIndex,
+				imageIndex,
+				uri: externalURI ? uri : null,
+				embedded:
+					imageDef.bufferView !== undefined ||
+					( uri !== null && uri.startsWith( 'data:' ) ),
+				sourceAssetIsModel:
+					linkedAssetId === modelAssetId
+			};
+
+			linked ++;
+
+		}
+
+		if ( linked > 0 ) {
+
+			console.log(
+				'3EXR AssetStore:',
+				'linked',
+				linked,
+				'glTF textures'
+			);
+
+		}
+
+		return linked;
+
+	}
+
 	this.loadFile = function ( file, manager, assetId = null ) {
 
 		const filename = file.name;
@@ -395,6 +604,11 @@ function Loader( editor ) {
 
 							scene.animations.push( ...result.animations );
 
+							linkGLTFTextures(
+								result,
+								assetId
+							);
+
 							if ( assetId ) {
 
 								editor.assetStore.linkObject(
@@ -453,6 +667,11 @@ function Loader( editor ) {
 							scene.name = filename;
 
 							scene.animations.push( ...result.animations );
+
+							linkGLTFTextures(
+								result,
+								assetId
+							);
 
 							if ( assetId ) {
 

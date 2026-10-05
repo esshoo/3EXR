@@ -154,20 +154,21 @@ class AssetStore {
 
 		if ( path === '' ) return null;
 
-		for ( const record of this.assets.values() ) {
+		const records = Array.from(
+			this.assets.values()
+		);
 
-			if (
-				this.normalizePath( record.sourcePath ) === path
-			) {
+		for ( const record of records ) {
 
-				return record.id;
+			const candidates = [
+				record.sourcePath,
+				...( record.aliases || [] )
+			];
 
-			}
-
-			for ( const alias of record.aliases || [] ) {
+			for ( const candidate of candidates ) {
 
 				if (
-					this.normalizePath( alias ) === path
+					this.normalizePath( candidate ) === path
 				) {
 
 					return record.id;
@@ -178,7 +179,43 @@ class AssetStore {
 
 		}
 
-		return null;
+		const filename =
+			path.split( '/' ).pop();
+
+		const matches = new Set();
+
+		for ( const record of records ) {
+
+			const candidates = [
+				record.sourcePath,
+				...( record.aliases || [] )
+			];
+
+			for ( const candidate of candidates ) {
+
+				const normalized =
+					this.normalizePath( candidate );
+
+				const candidateName =
+					normalized.split( '/' ).pop();
+
+				if (
+					normalized.endsWith( '/' + path ) ||
+					path.endsWith( '/' + normalized ) ||
+					candidateName === filename
+				) {
+
+					matches.add( record.id );
+
+				}
+
+			}
+
+		}
+
+		return matches.size === 1
+			? [ ... matches ][ 0 ]
+			: null;
 
 	}
 
