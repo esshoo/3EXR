@@ -282,6 +282,288 @@ class AssetStore {
 
 	}
 
+	collectUsage( scene ) {
+
+		const usage = new Map();
+
+		const add = ( assetId, entry ) => {
+
+			if ( typeof assetId !== 'string' || assetId === '' ) return;
+
+			if ( usage.has( assetId ) === false ) {
+
+				usage.set( assetId, [] );
+
+			}
+
+			usage.get( assetId ).push( entry );
+
+		};
+
+		const addTexture = ( texture, context ) => {
+
+			if ( ! texture || texture.isTexture !== true ) return;
+
+			const assetId = this.getLinkedAssetId( texture );
+
+			if ( ! assetId ) return;
+
+			add( assetId, {
+				type: 'texture',
+				textureUuid: texture.uuid || null,
+				textureName: texture.name || '',
+				... context
+			} );
+
+		};
+
+		const scanMaterial = ( material, object ) => {
+
+			if ( ! material ) return;
+
+			const materials =
+				Array.isArray( material )
+					? material
+					: [ material ];
+
+			for (
+				let materialIndex = 0;
+				materialIndex < materials.length;
+				materialIndex ++
+			) {
+
+				const current = materials[ materialIndex ];
+
+				if ( ! current ) continue;
+
+				for (
+					const [ slot, value ]
+					of Object.entries( current )
+				) {
+
+					if ( value?.isTexture === true ) {
+
+						addTexture( value, {
+							scope: 'material',
+							objectUuid: object.uuid || null,
+							objectName: object.name || '',
+							objectType: object.type || '',
+							materialUuid: current.uuid || null,
+							materialName: current.name || '',
+							materialIndex,
+							slot
+						} );
+
+					}
+
+				}
+
+				if (
+					current.uniforms &&
+					typeof current.uniforms === 'object'
+				) {
+
+					for (
+						const [ name, uniform ]
+						of Object.entries( current.uniforms )
+					) {
+
+						const value = uniform?.value;
+
+						if ( value?.isTexture === true ) {
+
+							addTexture( value, {
+								scope: 'material',
+								objectUuid: object.uuid || null,
+								objectName: object.name || '',
+								objectType: object.type || '',
+								materialUuid: current.uuid || null,
+								materialName: current.name || '',
+								materialIndex,
+								slot: 'uniforms.' + name
+							} );
+
+						} else if ( Array.isArray( value ) ) {
+
+							for (
+								let i = 0;
+								i < value.length;
+								i ++
+							) {
+
+								if (
+									value[ i ]?.isTexture !== true
+								) {
+
+									continue;
+
+								}
+
+								addTexture( value[ i ], {
+									scope: 'material',
+									objectUuid: object.uuid || null,
+									objectName: object.name || '',
+									objectType: object.type || '',
+									materialUuid: current.uuid || null,
+									materialName: current.name || '',
+									materialIndex,
+									slot:
+										'uniforms.' +
+										name +
+										'[' +
+										i +
+										']'
+								} );
+
+							}
+
+						}
+
+					}
+
+				}
+
+			}
+
+		};
+
+		if ( ! scene ) return usage;
+
+		addTexture(
+			scene.background,
+			{
+				scope: 'scene',
+				slot: 'background'
+			}
+		);
+
+		addTexture(
+			scene.environment,
+			{
+				scope: 'scene',
+				slot: 'environment'
+			}
+		);
+
+		if ( typeof scene.traverse === 'function' ) {
+
+			scene.traverse( object => {
+
+				const assetId =
+					this.getLinkedAssetId( object );
+
+				if ( assetId ) {
+
+					add( assetId, {
+						type: 'object',
+						objectUuid: object.uuid || null,
+						objectName: object.name || '',
+						objectType: object.type || ''
+					} );
+
+				}
+
+				scanMaterial(
+					object.material,
+					object
+				);
+
+			} );
+
+		}
+
+		return usage;
+
+	}
+
+	getAssetUsage( scene, assetId ) {
+
+		return this.collectUsage( scene )
+			.get( assetId ) || [];
+
+	}
+
+	isAssetUsed( scene, assetId ) {
+
+		return this.getAssetUsage(
+			scene,
+			assetId
+		).length > 0;
+
+	}
+
+	getUsageSummary( scene ) {
+
+		const usage = this.collectUsage( scene );
+		const result = [];
+
+		for ( const [ assetId, entries ] of usage ) {
+
+			let objects = 0;
+			let textures = 0;
+
+			for ( const entry of entries ) {
+
+				if ( entry.type === 'object' ) objects ++;
+				if ( entry.type === 'texture' ) textures ++;
+
+			}
+
+			result.push( {
+				assetId,
+				count: entries.length,
+				objects,
+				textures,
+				usages: entries
+			} );
+
+		}
+
+		return result.sort(
+			( a, b ) =>
+				a.assetId.localeCompare( b.assetId )
+		);
+
+	}
+
+	getUnusedAssetIds( scene ) {
+
+		const usage = this.collectUsage( scene );
+		const result = [];
+
+		for ( const id of this.assets.keys() ) {
+
+			if ( usage.has( id ) === false ) {
+
+				result.push( id );
+
+			}
+
+		}
+
+		return result.sort();
+
+	}
+
+	getDanglingAssetIds( scene ) {
+
+		const usage = this.collectUsage( scene );
+		const result = [];
+
+		for ( const id of usage.keys() ) {
+
+			if ( this.hasAsset( id ) === false ) {
+
+				result.push( id );
+
+			}
+
+		}
+
+		return result.sort();
+
+	}
+
 	normalizePath( value ) {
 
 		let path = String( value || '' ).replace( /\\/g, '/' );
