@@ -33,9 +33,11 @@ function Loader( editor ) {
 
 			filesMap = filesMap || LoaderUtils.createFilesMap( files );
 
+			let assetIds = [];
+
 			try {
 
-				await editor.assetStore.registerFiles( files, filesMap );
+				assetIds = await editor.assetStore.registerFiles( files, filesMap );
 
 			} catch ( error ) {
 
@@ -160,7 +162,11 @@ function Loader( editor ) {
 
 			for ( let i = 0; i < files.length; i ++ ) {
 
-				scope.loadFile( files[ i ], manager );
+				scope.loadFile(
+					files[ i ],
+					manager,
+					assetIds[ i ] || null
+				);
 
 			}
 
@@ -168,7 +174,7 @@ function Loader( editor ) {
 
 	};
 
-	this.loadFile = function ( file, manager ) {
+	this.loadFile = function ( file, manager, assetId = null ) {
 
 		const filename = file.name;
 		const extension = filename.split( '.' ).pop().toLowerCase();
@@ -389,6 +395,15 @@ function Loader( editor ) {
 
 							scene.animations.push( ...result.animations );
 
+							if ( assetId ) {
+
+								editor.assetStore.linkObject(
+									scene,
+									assetId
+								);
+
+							}
+
 							if ( options.asScene ) {
 
 								editor.execute( new SetSceneCommand( editor, scene ) );
@@ -438,6 +453,15 @@ function Loader( editor ) {
 							scene.name = filename;
 
 							scene.animations.push( ...result.animations );
+
+							if ( assetId ) {
+
+								editor.assetStore.linkObject(
+									scene,
+									assetId
+								);
+
+							}
 
 							if ( options.asScene ) {
 

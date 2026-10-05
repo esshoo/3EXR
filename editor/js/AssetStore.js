@@ -32,8 +32,216 @@ class AssetStore {
 
 	clear() {
 
+		if (
+			this.objectURLs &&
+			globalThis.URL &&
+			typeof globalThis.URL.revokeObjectURL === 'function'
+		) {
+
+			for ( const url of this.objectURLs ) {
+
+				globalThis.URL.revokeObjectURL( url );
+
+			}
+
+		}
+
 		this.assets = new Map();
 		this.hashIndex = new Map();
+		this.objectURLs = new Set();
+
+	}
+
+	getAsset( id ) {
+
+		return this.assets.get( id ) || null;
+
+	}
+
+	hasAsset( id ) {
+
+		return this.assets.has( id );
+
+	}
+
+	getBytes( id ) {
+
+		const asset = this.getAsset( id );
+
+		return asset ? asset.bytes : null;
+
+	}
+
+	getBlob( id ) {
+
+		const asset = this.getAsset( id );
+
+		if (
+			asset === null ||
+			typeof Blob === 'undefined'
+		) {
+
+			return null;
+
+		}
+
+		return new Blob(
+			[ asset.bytes ],
+			{
+				type: asset.mimeType || 'application/octet-stream'
+			}
+		);
+
+	}
+
+	createObjectURL( id ) {
+
+		const blob = this.getBlob( id );
+
+		if (
+			blob === null ||
+			! globalThis.URL ||
+			typeof globalThis.URL.createObjectURL !== 'function'
+		) {
+
+			return null;
+
+		}
+
+		const url = globalThis.URL.createObjectURL( blob );
+
+		this.objectURLs.add( url );
+
+		return url;
+
+	}
+
+	revokeObjectURL( url ) {
+
+		if (
+			typeof url !== 'string' ||
+			! this.objectURLs.has( url )
+		) {
+
+			return false;
+
+		}
+
+		if (
+			globalThis.URL &&
+			typeof globalThis.URL.revokeObjectURL === 'function'
+		) {
+
+			globalThis.URL.revokeObjectURL( url );
+
+		}
+
+		this.objectURLs.delete( url );
+
+		return true;
+
+	}
+
+	findByHash( hash ) {
+
+		return this.hashIndex.get( hash ) || null;
+
+	}
+
+	findBySourcePath( value ) {
+
+		const path = this.normalizePath( value );
+
+		if ( path === '' ) return null;
+
+		for ( const record of this.assets.values() ) {
+
+			if (
+				this.normalizePath( record.sourcePath ) === path
+			) {
+
+				return record.id;
+
+			}
+
+			for ( const alias of record.aliases || [] ) {
+
+				if (
+					this.normalizePath( alias ) === path
+				) {
+
+					return record.id;
+
+				}
+
+			}
+
+		}
+
+		return null;
+
+	}
+
+	linkTarget( target, assetId ) {
+
+		if (
+			! target ||
+			! assetId ||
+			! this.hasAsset( assetId )
+		) {
+
+			return false;
+
+		}
+
+		if (
+			! target.userData ||
+			typeof target.userData !== 'object' ||
+			Array.isArray( target.userData )
+		) {
+
+			target.userData = {};
+
+		}
+
+		const current = target.userData.__3exr;
+
+		const metadata =
+			current &&
+			typeof current === 'object' &&
+			! Array.isArray( current )
+				? { ... current }
+				: {};
+
+		metadata.version = 1;
+		metadata.sourceAssetId = assetId;
+
+		target.userData.__3exr = metadata;
+
+		return true;
+
+	}
+
+	linkObject( object, assetId ) {
+
+		return this.linkTarget( object, assetId );
+
+	}
+
+	linkTexture( texture, assetId ) {
+
+		return this.linkTarget( texture, assetId );
+
+	}
+
+	getLinkedAssetId( target ) {
+
+		const id =
+			target?.userData?.__3exr?.sourceAssetId;
+
+		return typeof id === 'string'
+			? id
+			: null;
 
 	}
 
