@@ -564,6 +564,144 @@ class AssetStore {
 
 	}
 
+	canDeleteAsset( scene, assetId ) {
+
+		if ( this.hasAsset( assetId ) === false ) {
+
+			return {
+				ok: false,
+				reason: 'NOT_FOUND',
+				assetId,
+				usage: []
+			};
+
+		}
+
+		const usage =
+			this.getAssetUsage(
+				scene,
+				assetId
+			);
+
+		if ( usage.length > 0 ) {
+
+			return {
+				ok: false,
+				reason: 'IN_USE',
+				assetId,
+				usage
+			};
+
+		}
+
+		return {
+			ok: true,
+			reason: 'UNUSED',
+			assetId,
+			usage: []
+		};
+
+	}
+
+	deleteAsset( scene, assetId ) {
+
+		const check =
+			this.canDeleteAsset(
+				scene,
+				assetId
+			);
+
+		if ( check.ok === false ) {
+
+			return check;
+
+		}
+
+		const asset =
+			this.getAsset( assetId );
+
+		if ( asset === null ) {
+
+			return {
+				ok: false,
+				reason: 'NOT_FOUND',
+				assetId,
+				usage: []
+			};
+
+		}
+
+		if (
+			asset.hash &&
+			this.hashIndex.get( asset.hash ) === assetId
+		) {
+
+			this.hashIndex.delete(
+				asset.hash
+			);
+
+		}
+
+		this.assets.delete(
+			assetId
+		);
+
+		console.log(
+			'3EXR AssetStore:',
+			'deleted',
+			asset.name,
+			'->',
+			assetId
+		);
+
+		return {
+			ok: true,
+			reason: 'DELETED',
+			assetId,
+			usage: []
+		};
+
+	}
+
+	deleteUnusedAssets( scene ) {
+
+		const ids =
+			this.getUnusedAssetIds( scene );
+
+		const deleted = [];
+		const failed = [];
+
+		for ( const assetId of ids ) {
+
+			const result =
+				this.deleteAsset(
+					scene,
+					assetId
+				);
+
+			if ( result.ok ) {
+
+				deleted.push(
+					assetId
+				);
+
+			} else {
+
+				failed.push(
+					result
+				);
+
+			}
+
+		}
+
+		return {
+			deleted,
+			failed
+		};
+
+	}
+
 	normalizePath( value ) {
 
 		let path = String( value || '' ).replace( /\\/g, '/' );
