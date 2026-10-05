@@ -4,6 +4,7 @@ import { TGALoader } from 'three/addons/loaders/TGALoader.js';
 
 import { AddObjectCommand } from './commands/AddObjectCommand.js';
 import { SetSceneCommand } from './commands/SetSceneCommand.js';
+import { ReimportModelCommand } from './commands/ReimportModelCommand.js';
 
 import { LoaderUtils } from './LoaderUtils.js';
 
@@ -33,9 +34,11 @@ function Loader( editor ) {
 
 			filesMap = filesMap || LoaderUtils.createFilesMap( files );
 
+			let assetIds = [];
+
 			try {
 
-				await editor.assetStore.registerFiles( files, filesMap );
+				assetIds = await editor.assetStore.registerFiles( files, filesMap );
 
 			} catch ( error ) {
 
@@ -160,7 +163,11 @@ function Loader( editor ) {
 
 			for ( let i = 0; i < files.length; i ++ ) {
 
-				scope.loadFile( files[ i ], manager );
+				scope.loadFile(
+					files[ i ],
+					manager,
+					assetIds[ i ] || null
+				);
 
 			}
 
@@ -168,7 +175,606 @@ function Loader( editor ) {
 
 	};
 
-	this.loadFile = function ( file, manager ) {
+	function getGLTFTextureSourceIndex( textureDef ) {
+
+		if ( ! textureDef ) return null;
+
+		const extensions =
+			textureDef.extensions || {};
+
+		if (
+			extensions.KHR_texture_basisu?.source !== undefined
+		) {
+
+			return extensions.KHR_texture_basisu.source;
+
+		}
+
+		if (
+			extensions.EXT_texture_avif?.source !== undefined
+		) {
+
+			return extensions.EXT_texture_avif.source;
+
+		}
+
+		if (
+			extensions.EXT_texture_webp?.source !== undefined
+		) {
+
+			return extensions.EXT_texture_webp.source;
+
+		}
+
+		return textureDef.source ?? null;
+
+	}
+
+	function collectMaterialTextures( material, textures ) {
+
+		if ( ! material ) return;
+
+		const materials = Array.isArray( material )
+			? material
+			: [ material ];
+
+		for ( const item of materials ) {
+
+			if ( ! item ) continue;
+
+			for ( const value of Object.values( item ) ) {
+
+				if (
+					value &&
+					value.isTexture === true
+				) {
+
+					textures.add( value );
+
+				}
+
+			}
+
+		}
+
+	}
+
+	function linkGLTFTextures( result, modelAssetId = null ) {
+
+		const parser = result?.parser;
+		const json = parser?.json;
+
+		if (
+			! parser ||
+			! parser.associations ||
+			! json
+		) {
+
+			return 0;
+
+		}
+
+		const textures = new Set();
+
+		const scenes =
+			Array.isArray( result.scenes ) &&
+			result.scenes.length > 0
+				? result.scenes
+				: [ result.scene ];
+
+		for ( const scene of scenes ) {
+
+			if (
+				! scene ||
+				typeof scene.traverse !== 'function'
+			) {
+
+				continue;
+
+			}
+
+			scene.traverse( function ( object ) {
+
+				collectMaterialTextures(
+					object.material,
+					textures
+				);
+
+			} );
+
+		}
+
+		let linked = 0;
+
+		for ( const texture of textures ) {
+
+			const association =
+				parser.associations.get( texture );
+
+			const textureIndex =
+				association?.textures;
+
+			if (
+				typeof textureIndex !== 'number'
+			) {
+
+				continue;
+
+			}
+
+			const textureDef =
+				json.textures?.[ textureIndex ];
+
+			const imageIndex =
+				getGLTFTextureSourceIndex(
+					textureDef
+				);
+
+			if (
+				typeof imageIndex !== 'number'
+			) {
+
+				continue;
+
+			}
+
+			const imageDef =
+				json.images?.[ imageIndex ];
+
+			if ( ! imageDef ) continue;
+
+			const uri =
+				typeof imageDef.uri === 'string'
+					? imageDef.uri
+					: null;
+
+			const externalURI =
+				uri !== null &&
+				! uri.startsWith( 'data:' );
+
+			const imageAssetId =
+				externalURI
+					? editor.assetStore.findBySourcePath( uri )
+					: null;
+
+			const linkedAssetId =
+				imageAssetId ||
+				modelAssetId;
+
+			if ( ! linkedAssetId ) continue;
+
+			if (
+				editor.assetStore.linkTexture(
+					texture,
+					linkedAssetId
+				) === false
+			) {
+
+				continue;
+
+			}
+
+			texture.userData.__3exr.gltf = {
+				textureIndex,
+				imageIndex,
+				uri: externalURI ? uri : null,
+				embedded:
+					imageDef.bufferView !== undefined ||
+					( uri !== null && uri.startsWith( 'data:' ) ),
+				sourceAssetIsModel:
+					linkedAssetId === modelAssetId
+			};
+
+			linked ++;
+
+		}
+
+		if ( linked > 0 ) {
+
+			console.log(
+				'3EXR AssetStore:',
+				'linked',
+				linked,
+				'glTF textures'
+			);
+
+		}
+
+		return linked;
+
+	}
+
+	function markSceneImportBoundary( scene, assetId ) {
+
+		if (
+			! scene ||
+			! assetId
+		) {
+
+			return;
+
+		}
+
+		editor.assetStore.linkObject(
+			scene,
+			assetId
+		);
+
+		const metadata =
+			scene.userData.__3exr;
+
+		metadata.sceneImport = {
+			version: 1,
+			assetId,
+			topLevelObjectUuids:
+				scene.children.map(
+					child => child.uuid
+				)
+		};
+
+	}
+
+	function createAssetLoadingManager() {
+
+		const manager =
+			new THREE.LoadingManager();
+
+		const objectURLs =
+			new Set();
+
+		manager.setURLModifier(
+			function ( url ) {
+
+				if (
+					typeof url !== 'string' ||
+					url.startsWith( 'data:' ) ||
+					url.startsWith( 'blob:' )
+				) {
+
+					return url;
+
+				}
+
+				let lookup = url;
+
+				try {
+
+					lookup =
+						decodeURIComponent(
+							lookup
+						);
+
+				} catch ( error ) {
+
+					// Keep original URL.
+
+				}
+
+				const dependencyAssetId =
+					editor.assetStore.findBySourcePath(
+						lookup
+					);
+
+				if ( ! dependencyAssetId ) {
+
+					return url;
+
+				}
+
+				const objectURL =
+					editor.assetStore.createObjectURL(
+						dependencyAssetId
+					);
+
+				if ( ! objectURL ) {
+
+					return url;
+
+				}
+
+				objectURLs.add(
+					objectURL
+				);
+
+				return objectURL;
+
+			}
+		);
+
+		return {
+
+			manager,
+
+			release() {
+
+				for ( const url of objectURLs ) {
+
+					editor.assetStore.revokeObjectURL(
+						url
+					);
+
+				}
+
+				objectURLs.clear();
+
+			}
+
+		};
+
+	}
+
+	this.loadModelAsset = async function ( assetId ) {
+
+		const asset =
+			editor.assetStore.getAsset(
+				assetId
+			);
+
+		if ( asset === null ) {
+
+			const error =
+				new Error(
+					'3EXR model asset not found: ' +
+					assetId
+				);
+
+			error.code =
+				'ASSET_NOT_FOUND';
+
+			throw error;
+
+		}
+
+		const extension =
+			asset.extension ||
+			editor.assetStore.getExtension(
+				asset.name
+			);
+
+		if (
+			extension !== 'glb' &&
+			extension !== 'gltf'
+		) {
+
+			const error =
+				new Error(
+					'3EXR model reimport does not support .' +
+					extension +
+					' yet.'
+				);
+
+			error.code =
+				'UNSUPPORTED_MODEL_FORMAT';
+
+			throw error;
+
+		}
+
+		const bytes =
+			asset.bytes;
+
+		if (
+			! bytes ||
+			typeof bytes.byteLength !== 'number'
+		) {
+
+			const error =
+				new Error(
+					'3EXR model asset has no data: ' +
+					assetId
+				);
+
+			error.code =
+				'ASSET_DATA_MISSING';
+
+			throw error;
+
+		}
+
+		const assetManager =
+			createAssetLoadingManager();
+
+		const loader =
+			await createGLTFLoader(
+				assetManager.manager
+			);
+
+		let contents;
+
+		if ( extension === 'glb' ) {
+
+			contents =
+				bytes.buffer.slice(
+					bytes.byteOffset,
+					bytes.byteOffset +
+					bytes.byteLength
+				);
+
+		} else {
+
+			contents =
+				new TextDecoder(
+					'utf-8'
+				).decode(
+					bytes
+				);
+
+		}
+
+		try {
+
+			const result =
+				await new Promise(
+					( resolve, reject ) => {
+
+						loader.parse(
+							contents,
+							'',
+							resolve,
+							reject
+						);
+
+					}
+				);
+
+			const object =
+				result.scene;
+
+			if ( ! object ) {
+
+				const error =
+					new Error(
+						'3EXR model asset did not produce a scene.'
+					);
+
+				error.code =
+					'MODEL_SCENE_MISSING';
+
+				throw error;
+
+			}
+
+			object.name =
+				asset.name;
+
+			object.animations.push(
+				... result.animations
+			);
+
+			linkGLTFTextures(
+				result,
+				assetId
+			);
+
+			editor.assetStore.linkObject(
+				object,
+				assetId
+			);
+
+			console.log(
+				'3EXR Loader:',
+				'loaded model asset',
+				asset.name,
+				'->',
+				assetId
+			);
+
+			return object;
+
+		} finally {
+
+			if ( loader.dracoLoader ) {
+
+				loader.dracoLoader.dispose();
+
+			}
+
+			if ( loader.ktx2Loader ) {
+
+				loader.ktx2Loader.dispose();
+
+			}
+
+			assetManager.release();
+
+		}
+
+	};
+
+	this.reimportModel = async function ( target ) {
+
+		if ( ! target ) {
+
+			const error =
+				new Error(
+					'3EXR reimport target is missing.'
+				);
+
+			error.code =
+				'REIMPORT_TARGET_MISSING';
+
+			throw error;
+
+		}
+
+		const assetId =
+			editor.assetStore.getLinkedAssetId(
+				target
+			);
+
+		if ( ! assetId ) {
+
+			const error =
+				new Error(
+					'3EXR reimport target is not linked to an asset.'
+				);
+
+			error.code =
+				'REIMPORT_ASSET_LINK_MISSING';
+
+			throw error;
+
+		}
+
+		if ( target === editor.scene ) {
+
+			const boundary =
+				target.userData
+					?.__3exr
+					?.sceneImport
+					?.topLevelObjectUuids;
+
+			if (
+				! Array.isArray( boundary ) ||
+				boundary.length === 0
+			) {
+
+				const error =
+					new Error(
+						'This scene was imported before 3EXR scene reimport boundaries were introduced. Reimport is blocked to protect user-added scene objects.'
+					);
+
+				error.code =
+					'SCENE_IMPORT_BOUNDARY_MISSING';
+
+				throw error;
+
+			}
+
+		}
+
+		const replacement =
+			await this.loadModelAsset(
+				assetId
+			);
+
+		const command =
+			new ReimportModelCommand(
+				editor,
+				target,
+				replacement
+			);
+
+		editor.execute(
+			command,
+			'Reimport Model'
+		);
+
+		console.log(
+			'3EXR Loader:',
+			'reimported',
+			target.name,
+			'from',
+			assetId
+		);
+
+		return command.isScene
+			? editor.scene
+			: replacement;
+
+	};
+
+	this.loadFile = function ( file, manager, assetId = null ) {
 
 		const filename = file.name;
 		const extension = filename.split( '.' ).pop().toLowerCase();
@@ -389,6 +995,32 @@ function Loader( editor ) {
 
 							scene.animations.push( ...result.animations );
 
+							linkGLTFTextures(
+								result,
+								assetId
+							);
+
+							if ( assetId ) {
+
+								editor.assetStore.linkObject(
+									scene,
+									assetId
+								);
+
+							}
+
+							if (
+								options.asScene &&
+								assetId
+							) {
+
+								markSceneImportBoundary(
+									scene,
+									assetId
+								);
+
+							}
+
 							if ( options.asScene ) {
 
 								editor.execute( new SetSceneCommand( editor, scene ) );
@@ -438,6 +1070,32 @@ function Loader( editor ) {
 							scene.name = filename;
 
 							scene.animations.push( ...result.animations );
+
+							linkGLTFTextures(
+								result,
+								assetId
+							);
+
+							if ( assetId ) {
+
+								editor.assetStore.linkObject(
+									scene,
+									assetId
+								);
+
+							}
+
+							if (
+								options.asScene &&
+								assetId
+							) {
+
+								markSceneImportBoundary(
+									scene,
+									assetId
+								);
+
+							}
 
 							if ( options.asScene ) {
 

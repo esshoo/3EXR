@@ -32,8 +32,673 @@ class AssetStore {
 
 	clear() {
 
+		if (
+			this.objectURLs &&
+			globalThis.URL &&
+			typeof globalThis.URL.revokeObjectURL === 'function'
+		) {
+
+			for ( const url of this.objectURLs ) {
+
+				globalThis.URL.revokeObjectURL( url );
+
+			}
+
+		}
+
 		this.assets = new Map();
 		this.hashIndex = new Map();
+		this.objectURLs = new Set();
+
+	}
+
+	getAsset( id ) {
+
+		return this.assets.get( id ) || null;
+
+	}
+
+	hasAsset( id ) {
+
+		return this.assets.has( id );
+
+	}
+
+	getBytes( id ) {
+
+		const asset = this.getAsset( id );
+
+		return asset ? asset.bytes : null;
+
+	}
+
+	getBlob( id ) {
+
+		const asset = this.getAsset( id );
+
+		if (
+			asset === null ||
+			typeof Blob === 'undefined'
+		) {
+
+			return null;
+
+		}
+
+		return new Blob(
+			[ asset.bytes ],
+			{
+				type: asset.mimeType || 'application/octet-stream'
+			}
+		);
+
+	}
+
+	createObjectURL( id ) {
+
+		const blob = this.getBlob( id );
+
+		if (
+			blob === null ||
+			! globalThis.URL ||
+			typeof globalThis.URL.createObjectURL !== 'function'
+		) {
+
+			return null;
+
+		}
+
+		const url = globalThis.URL.createObjectURL( blob );
+
+		this.objectURLs.add( url );
+
+		return url;
+
+	}
+
+	revokeObjectURL( url ) {
+
+		if (
+			typeof url !== 'string' ||
+			! this.objectURLs.has( url )
+		) {
+
+			return false;
+
+		}
+
+		if (
+			globalThis.URL &&
+			typeof globalThis.URL.revokeObjectURL === 'function'
+		) {
+
+			globalThis.URL.revokeObjectURL( url );
+
+		}
+
+		this.objectURLs.delete( url );
+
+		return true;
+
+	}
+
+	findByHash( hash ) {
+
+		return this.hashIndex.get( hash ) || null;
+
+	}
+
+	findBySourcePath( value ) {
+
+		const path = this.normalizePath( value );
+
+		if ( path === '' ) return null;
+
+		const records = Array.from(
+			this.assets.values()
+		);
+
+		for ( const record of records ) {
+
+			const candidates = [
+				record.sourcePath,
+				...( record.aliases || [] )
+			];
+
+			for ( const candidate of candidates ) {
+
+				if (
+					this.normalizePath( candidate ) === path
+				) {
+
+					return record.id;
+
+				}
+
+			}
+
+		}
+
+		const filename =
+			path.split( '/' ).pop();
+
+		const matches = new Set();
+
+		for ( const record of records ) {
+
+			const candidates = [
+				record.sourcePath,
+				...( record.aliases || [] )
+			];
+
+			for ( const candidate of candidates ) {
+
+				const normalized =
+					this.normalizePath( candidate );
+
+				const candidateName =
+					normalized.split( '/' ).pop();
+
+				if (
+					normalized.endsWith( '/' + path ) ||
+					path.endsWith( '/' + normalized ) ||
+					candidateName === filename
+				) {
+
+					matches.add( record.id );
+
+				}
+
+			}
+
+		}
+
+		return matches.size === 1
+			? [ ... matches ][ 0 ]
+			: null;
+
+	}
+
+	linkTarget( target, assetId ) {
+
+		if (
+			! target ||
+			! assetId ||
+			! this.hasAsset( assetId )
+		) {
+
+			return false;
+
+		}
+
+		if (
+			! target.userData ||
+			typeof target.userData !== 'object' ||
+			Array.isArray( target.userData )
+		) {
+
+			target.userData = {};
+
+		}
+
+		const current = target.userData.__3exr;
+
+		const metadata =
+			current &&
+			typeof current === 'object' &&
+			! Array.isArray( current )
+				? { ... current }
+				: {};
+
+		metadata.version = 1;
+		metadata.sourceAssetId = assetId;
+
+		target.userData.__3exr = metadata;
+
+		return true;
+
+	}
+
+	linkObject( object, assetId ) {
+
+		return this.linkTarget( object, assetId );
+
+	}
+
+	linkTexture( texture, assetId ) {
+
+		return this.linkTarget( texture, assetId );
+
+	}
+
+	getLinkedAssetId( target ) {
+
+		const id =
+			target?.userData?.__3exr?.sourceAssetId;
+
+		return typeof id === 'string'
+			? id
+			: null;
+
+	}
+
+	collectUsage( scene ) {
+
+		const usage = new Map();
+
+		const add = ( assetId, entry ) => {
+
+			if ( typeof assetId !== 'string' || assetId === '' ) return;
+
+			if ( usage.has( assetId ) === false ) {
+
+				usage.set( assetId, [] );
+
+			}
+
+			usage.get( assetId ).push( entry );
+
+		};
+
+		const addTexture = ( texture, context ) => {
+
+			if ( ! texture || texture.isTexture !== true ) return;
+
+			const assetId = this.getLinkedAssetId( texture );
+
+			if ( ! assetId ) return;
+
+			add( assetId, {
+				type: 'texture',
+				textureUuid: texture.uuid || null,
+				textureName: texture.name || '',
+				... context
+			} );
+
+		};
+
+		const scanMaterial = ( material, object ) => {
+
+			if ( ! material ) return;
+
+			const materials =
+				Array.isArray( material )
+					? material
+					: [ material ];
+
+			for (
+				let materialIndex = 0;
+				materialIndex < materials.length;
+				materialIndex ++
+			) {
+
+				const current = materials[ materialIndex ];
+
+				if ( ! current ) continue;
+
+				for (
+					const [ slot, value ]
+					of Object.entries( current )
+				) {
+
+					if ( value?.isTexture === true ) {
+
+						addTexture( value, {
+							scope: 'material',
+							objectUuid: object.uuid || null,
+							objectName: object.name || '',
+							objectType: object.type || '',
+							materialUuid: current.uuid || null,
+							materialName: current.name || '',
+							materialIndex,
+							slot
+						} );
+
+					}
+
+				}
+
+				if (
+					current.uniforms &&
+					typeof current.uniforms === 'object'
+				) {
+
+					for (
+						const [ name, uniform ]
+						of Object.entries( current.uniforms )
+					) {
+
+						const value = uniform?.value;
+
+						if ( value?.isTexture === true ) {
+
+							addTexture( value, {
+								scope: 'material',
+								objectUuid: object.uuid || null,
+								objectName: object.name || '',
+								objectType: object.type || '',
+								materialUuid: current.uuid || null,
+								materialName: current.name || '',
+								materialIndex,
+								slot: 'uniforms.' + name
+							} );
+
+						} else if ( Array.isArray( value ) ) {
+
+							for (
+								let i = 0;
+								i < value.length;
+								i ++
+							) {
+
+								if (
+									value[ i ]?.isTexture !== true
+								) {
+
+									continue;
+
+								}
+
+								addTexture( value[ i ], {
+									scope: 'material',
+									objectUuid: object.uuid || null,
+									objectName: object.name || '',
+									objectType: object.type || '',
+									materialUuid: current.uuid || null,
+									materialName: current.name || '',
+									materialIndex,
+									slot:
+										'uniforms.' +
+										name +
+										'[' +
+										i +
+										']'
+								} );
+
+							}
+
+						}
+
+					}
+
+				}
+
+			}
+
+		};
+
+		if ( ! scene ) return usage;
+
+		addTexture(
+			scene.background,
+			{
+				scope: 'scene',
+				slot: 'background'
+			}
+		);
+
+		addTexture(
+			scene.environment,
+			{
+				scope: 'scene',
+				slot: 'environment'
+			}
+		);
+
+		if ( typeof scene.traverse === 'function' ) {
+
+			scene.traverse( object => {
+
+				const assetId =
+					this.getLinkedAssetId( object );
+
+				if ( assetId ) {
+
+					add( assetId, {
+						type: 'object',
+						objectUuid: object.uuid || null,
+						objectName: object.name || '',
+						objectType: object.type || ''
+					} );
+
+				}
+
+				scanMaterial(
+					object.material,
+					object
+				);
+
+			} );
+
+		}
+
+		return usage;
+
+	}
+
+	getAssetUsage( scene, assetId ) {
+
+		return this.collectUsage( scene )
+			.get( assetId ) || [];
+
+	}
+
+	isAssetUsed( scene, assetId ) {
+
+		return this.getAssetUsage(
+			scene,
+			assetId
+		).length > 0;
+
+	}
+
+	getUsageSummary( scene ) {
+
+		const usage = this.collectUsage( scene );
+		const result = [];
+
+		for ( const [ assetId, entries ] of usage ) {
+
+			let objects = 0;
+			let textures = 0;
+
+			for ( const entry of entries ) {
+
+				if ( entry.type === 'object' ) objects ++;
+				if ( entry.type === 'texture' ) textures ++;
+
+			}
+
+			result.push( {
+				assetId,
+				count: entries.length,
+				objects,
+				textures,
+				usages: entries
+			} );
+
+		}
+
+		return result.sort(
+			( a, b ) =>
+				a.assetId.localeCompare( b.assetId )
+		);
+
+	}
+
+	getUnusedAssetIds( scene ) {
+
+		const usage = this.collectUsage( scene );
+		const result = [];
+
+		for ( const id of this.assets.keys() ) {
+
+			if ( usage.has( id ) === false ) {
+
+				result.push( id );
+
+			}
+
+		}
+
+		return result.sort();
+
+	}
+
+	getDanglingAssetIds( scene ) {
+
+		const usage = this.collectUsage( scene );
+		const result = [];
+
+		for ( const id of usage.keys() ) {
+
+			if ( this.hasAsset( id ) === false ) {
+
+				result.push( id );
+
+			}
+
+		}
+
+		return result.sort();
+
+	}
+
+	canDeleteAsset( scene, assetId ) {
+
+		if ( this.hasAsset( assetId ) === false ) {
+
+			return {
+				ok: false,
+				reason: 'NOT_FOUND',
+				assetId,
+				usage: []
+			};
+
+		}
+
+		const usage =
+			this.getAssetUsage(
+				scene,
+				assetId
+			);
+
+		if ( usage.length > 0 ) {
+
+			return {
+				ok: false,
+				reason: 'IN_USE',
+				assetId,
+				usage
+			};
+
+		}
+
+		return {
+			ok: true,
+			reason: 'UNUSED',
+			assetId,
+			usage: []
+		};
+
+	}
+
+	deleteAsset( scene, assetId ) {
+
+		const check =
+			this.canDeleteAsset(
+				scene,
+				assetId
+			);
+
+		if ( check.ok === false ) {
+
+			return check;
+
+		}
+
+		const asset =
+			this.getAsset( assetId );
+
+		if ( asset === null ) {
+
+			return {
+				ok: false,
+				reason: 'NOT_FOUND',
+				assetId,
+				usage: []
+			};
+
+		}
+
+		if (
+			asset.hash &&
+			this.hashIndex.get( asset.hash ) === assetId
+		) {
+
+			this.hashIndex.delete(
+				asset.hash
+			);
+
+		}
+
+		this.assets.delete(
+			assetId
+		);
+
+		console.log(
+			'3EXR AssetStore:',
+			'deleted',
+			asset.name,
+			'->',
+			assetId
+		);
+
+		return {
+			ok: true,
+			reason: 'DELETED',
+			assetId,
+			usage: []
+		};
+
+	}
+
+	deleteUnusedAssets( scene ) {
+
+		const ids =
+			this.getUnusedAssetIds( scene );
+
+		const deleted = [];
+		const failed = [];
+
+		for ( const assetId of ids ) {
+
+			const result =
+				this.deleteAsset(
+					scene,
+					assetId
+				);
+
+			if ( result.ok ) {
+
+				deleted.push(
+					assetId
+				);
+
+			} else {
+
+				failed.push(
+					result
+				);
+
+			}
+
+		}
+
+		return {
+			deleted,
+			failed
+		};
 
 	}
 
@@ -303,6 +968,197 @@ file.name;
 		}
 
 		return result;
+
+	}
+
+	async replaceAssetFile( assetId, file, sourcePath = null ) {
+
+		const existing =
+			this.getAsset( assetId );
+
+		if ( existing === null ) {
+
+			return {
+				ok: false,
+				reason: 'NOT_FOUND',
+				assetId
+			};
+
+		}
+
+		if (
+			! file ||
+			typeof file.arrayBuffer !== 'function'
+		) {
+
+			return {
+				ok: false,
+				reason: 'INVALID_FILE',
+				assetId
+			};
+
+		}
+
+		const bytes = new Uint8Array(
+			await file.arrayBuffer()
+		);
+
+		const hash =
+			await this.hashBytes( bytes );
+
+		if ( hash === existing.hash ) {
+
+			return {
+				ok: true,
+				reason: 'UNCHANGED',
+				assetId,
+				hash
+			};
+
+		}
+
+		const duplicateId =
+			this.hashIndex.get( hash );
+
+		if (
+			duplicateId &&
+			duplicateId !== assetId
+		) {
+
+			return {
+				ok: false,
+				reason: 'DUPLICATE',
+				assetId,
+				duplicateAssetId: duplicateId,
+				hash
+			};
+
+		}
+
+		const name =
+			file.name ||
+			existing.name ||
+			'asset';
+
+		const kind =
+			this.getKind( file );
+
+		const extension =
+			this.getExtension( name );
+
+		const folder =
+			this.getFolder( kind );
+
+		const normalizedSourcePath =
+			this.normalizePath(
+				sourcePath ||
+				file.webkitRelativePath ||
+				file.name ||
+				existing.sourcePath ||
+				name
+			);
+
+		const aliases = new Set(
+			Array.isArray( existing.aliases )
+				? existing.aliases
+				: []
+		);
+
+		if ( existing.sourcePath ) {
+
+			aliases.add(
+				this.normalizePath(
+					existing.sourcePath
+				)
+			);
+
+		}
+
+		if ( normalizedSourcePath ) {
+
+			aliases.add(
+				normalizedSourcePath
+			);
+
+		}
+
+		const archivePath =
+			'assets/' +
+			folder +
+			'/' +
+			assetId +
+			'_' +
+			this.safeName( name );
+
+		const previousHash =
+			existing.hash || null;
+
+		if (
+			previousHash &&
+			this.hashIndex.get( previousHash ) === assetId
+		) {
+
+			this.hashIndex.delete(
+				previousHash
+			);
+
+		}
+
+		const updated = {
+			... existing,
+
+			id: assetId,
+			name,
+			kind,
+			extension,
+
+			mimeType:
+				file.type ||
+				existing.mimeType ||
+				'application/octet-stream',
+
+			size: bytes.byteLength,
+
+			lastModified:
+				Number( file.lastModified ) || 0,
+
+			sourcePath:
+				normalizedSourcePath || name,
+
+			aliases:
+				[ ... aliases ],
+
+			archivePath,
+			hash,
+			bytes
+		};
+
+		this.assets.set(
+			assetId,
+			updated
+		);
+
+		this.hashIndex.set(
+			hash,
+			assetId
+		);
+
+		console.log(
+			'3EXR AssetStore:',
+			'replaced',
+			name,
+			'->',
+			assetId
+		);
+
+		return {
+			ok: true,
+			reason: 'REPLACED',
+			assetId,
+			previousHash,
+			hash,
+			asset: updated
+		};
 
 	}
 
