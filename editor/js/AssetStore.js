@@ -971,6 +971,197 @@ file.name;
 
 	}
 
+	async replaceAssetFile( assetId, file, sourcePath = null ) {
+
+		const existing =
+			this.getAsset( assetId );
+
+		if ( existing === null ) {
+
+			return {
+				ok: false,
+				reason: 'NOT_FOUND',
+				assetId
+			};
+
+		}
+
+		if (
+			! file ||
+			typeof file.arrayBuffer !== 'function'
+		) {
+
+			return {
+				ok: false,
+				reason: 'INVALID_FILE',
+				assetId
+			};
+
+		}
+
+		const bytes = new Uint8Array(
+			await file.arrayBuffer()
+		);
+
+		const hash =
+			await this.hashBytes( bytes );
+
+		if ( hash === existing.hash ) {
+
+			return {
+				ok: true,
+				reason: 'UNCHANGED',
+				assetId,
+				hash
+			};
+
+		}
+
+		const duplicateId =
+			this.hashIndex.get( hash );
+
+		if (
+			duplicateId &&
+			duplicateId !== assetId
+		) {
+
+			return {
+				ok: false,
+				reason: 'DUPLICATE',
+				assetId,
+				duplicateAssetId: duplicateId,
+				hash
+			};
+
+		}
+
+		const name =
+			file.name ||
+			existing.name ||
+			'asset';
+
+		const kind =
+			this.getKind( file );
+
+		const extension =
+			this.getExtension( name );
+
+		const folder =
+			this.getFolder( kind );
+
+		const normalizedSourcePath =
+			this.normalizePath(
+				sourcePath ||
+				file.webkitRelativePath ||
+				file.name ||
+				existing.sourcePath ||
+				name
+			);
+
+		const aliases = new Set(
+			Array.isArray( existing.aliases )
+				? existing.aliases
+				: []
+		);
+
+		if ( existing.sourcePath ) {
+
+			aliases.add(
+				this.normalizePath(
+					existing.sourcePath
+				)
+			);
+
+		}
+
+		if ( normalizedSourcePath ) {
+
+			aliases.add(
+				normalizedSourcePath
+			);
+
+		}
+
+		const archivePath =
+			'assets/' +
+			folder +
+			'/' +
+			assetId +
+			'_' +
+			this.safeName( name );
+
+		const previousHash =
+			existing.hash || null;
+
+		if (
+			previousHash &&
+			this.hashIndex.get( previousHash ) === assetId
+		) {
+
+			this.hashIndex.delete(
+				previousHash
+			);
+
+		}
+
+		const updated = {
+			... existing,
+
+			id: assetId,
+			name,
+			kind,
+			extension,
+
+			mimeType:
+				file.type ||
+				existing.mimeType ||
+				'application/octet-stream',
+
+			size: bytes.byteLength,
+
+			lastModified:
+				Number( file.lastModified ) || 0,
+
+			sourcePath:
+				normalizedSourcePath || name,
+
+			aliases:
+				[ ... aliases ],
+
+			archivePath,
+			hash,
+			bytes
+		};
+
+		this.assets.set(
+			assetId,
+			updated
+		);
+
+		this.hashIndex.set(
+			hash,
+			assetId
+		);
+
+		console.log(
+			'3EXR AssetStore:',
+			'replaced',
+			name,
+			'->',
+			assetId
+		);
+
+		return {
+			ok: true,
+			reason: 'REPLACED',
+			assetId,
+			previousHash,
+			hash,
+			asset: updated
+		};
+
+	}
+
 	getManifestEntries() {
 
 		return Array.from( this.assets.values() )
