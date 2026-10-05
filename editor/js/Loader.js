@@ -4,6 +4,7 @@ import { TGALoader } from 'three/addons/loaders/TGALoader.js';
 
 import { AddObjectCommand } from './commands/AddObjectCommand.js';
 import { SetSceneCommand } from './commands/SetSceneCommand.js';
+import { ReimportModelCommand } from './commands/ReimportModelCommand.js';
 
 import { LoaderUtils } from './LoaderUtils.js';
 
@@ -383,6 +384,36 @@ function Loader( editor ) {
 
 	}
 
+	function markSceneImportBoundary( scene, assetId ) {
+
+		if (
+			! scene ||
+			! assetId
+		) {
+
+			return;
+
+		}
+
+		editor.assetStore.linkObject(
+			scene,
+			assetId
+		);
+
+		const metadata =
+			scene.userData.__3exr;
+
+		metadata.sceneImport = {
+			version: 1,
+			assetId,
+			topLevelObjectUuids:
+				scene.children.map(
+					child => child.uuid
+				)
+		};
+
+	}
+
 	function createAssetLoadingManager() {
 
 		const manager =
@@ -648,7 +679,100 @@ function Loader( editor ) {
 
 		}
 
-	}
+	};
+
+	this.reimportModel = async function ( target ) {
+
+		if ( ! target ) {
+
+			const error =
+				new Error(
+					'3EXR reimport target is missing.'
+				);
+
+			error.code =
+				'REIMPORT_TARGET_MISSING';
+
+			throw error;
+
+		}
+
+		const assetId =
+			editor.assetStore.getLinkedAssetId(
+				target
+			);
+
+		if ( ! assetId ) {
+
+			const error =
+				new Error(
+					'3EXR reimport target is not linked to an asset.'
+				);
+
+			error.code =
+				'REIMPORT_ASSET_LINK_MISSING';
+
+			throw error;
+
+		}
+
+		if ( target === editor.scene ) {
+
+			const boundary =
+				target.userData
+					?.__3exr
+					?.sceneImport
+					?.topLevelObjectUuids;
+
+			if (
+				! Array.isArray( boundary ) ||
+				boundary.length === 0
+			) {
+
+				const error =
+					new Error(
+						'This scene was imported before 3EXR scene reimport boundaries were introduced. Reimport is blocked to protect user-added scene objects.'
+					);
+
+				error.code =
+					'SCENE_IMPORT_BOUNDARY_MISSING';
+
+				throw error;
+
+			}
+
+		}
+
+		const replacement =
+			await this.loadModelAsset(
+				assetId
+			);
+
+		const command =
+			new ReimportModelCommand(
+				editor,
+				target,
+				replacement
+			);
+
+		editor.execute(
+			command,
+			'Reimport Model'
+		);
+
+		console.log(
+			'3EXR Loader:',
+			'reimported',
+			target.name,
+			'from',
+			assetId
+		);
+
+		return command.isScene
+			? editor.scene
+			: replacement;
+
+	};
 
 	this.loadFile = function ( file, manager, assetId = null ) {
 
@@ -885,6 +1009,18 @@ function Loader( editor ) {
 
 							}
 
+							if (
+								options.asScene &&
+								assetId
+							) {
+
+								markSceneImportBoundary(
+									scene,
+									assetId
+								);
+
+							}
+
 							if ( options.asScene ) {
 
 								editor.execute( new SetSceneCommand( editor, scene ) );
@@ -943,6 +1079,18 @@ function Loader( editor ) {
 							if ( assetId ) {
 
 								editor.assetStore.linkObject(
+									scene,
+									assetId
+								);
+
+							}
+
+							if (
+								options.asScene &&
+								assetId
+							) {
+
+								markSceneImportBoundary(
 									scene,
 									assetId
 								);
