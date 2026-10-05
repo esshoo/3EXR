@@ -383,6 +383,273 @@ function Loader( editor ) {
 
 	}
 
+	function createAssetLoadingManager() {
+
+		const manager =
+			new THREE.LoadingManager();
+
+		const objectURLs =
+			new Set();
+
+		manager.setURLModifier(
+			function ( url ) {
+
+				if (
+					typeof url !== 'string' ||
+					url.startsWith( 'data:' ) ||
+					url.startsWith( 'blob:' )
+				) {
+
+					return url;
+
+				}
+
+				let lookup = url;
+
+				try {
+
+					lookup =
+						decodeURIComponent(
+							lookup
+						);
+
+				} catch ( error ) {
+
+					// Keep original URL.
+
+				}
+
+				const dependencyAssetId =
+					editor.assetStore.findBySourcePath(
+						lookup
+					);
+
+				if ( ! dependencyAssetId ) {
+
+					return url;
+
+				}
+
+				const objectURL =
+					editor.assetStore.createObjectURL(
+						dependencyAssetId
+					);
+
+				if ( ! objectURL ) {
+
+					return url;
+
+				}
+
+				objectURLs.add(
+					objectURL
+				);
+
+				return objectURL;
+
+			}
+		);
+
+		return {
+
+			manager,
+
+			release() {
+
+				for ( const url of objectURLs ) {
+
+					editor.assetStore.revokeObjectURL(
+						url
+					);
+
+				}
+
+				objectURLs.clear();
+
+			}
+
+		};
+
+	}
+
+	this.loadModelAsset = async function ( assetId ) {
+
+		const asset =
+			editor.assetStore.getAsset(
+				assetId
+			);
+
+		if ( asset === null ) {
+
+			const error =
+				new Error(
+					'3EXR model asset not found: ' +
+					assetId
+				);
+
+			error.code =
+				'ASSET_NOT_FOUND';
+
+			throw error;
+
+		}
+
+		const extension =
+			asset.extension ||
+			editor.assetStore.getExtension(
+				asset.name
+			);
+
+		if (
+			extension !== 'glb' &&
+			extension !== 'gltf'
+		) {
+
+			const error =
+				new Error(
+					'3EXR model reimport does not support .' +
+					extension +
+					' yet.'
+				);
+
+			error.code =
+				'UNSUPPORTED_MODEL_FORMAT';
+
+			throw error;
+
+		}
+
+		const bytes =
+			asset.bytes;
+
+		if (
+			! bytes ||
+			typeof bytes.byteLength !== 'number'
+		) {
+
+			const error =
+				new Error(
+					'3EXR model asset has no data: ' +
+					assetId
+				);
+
+			error.code =
+				'ASSET_DATA_MISSING';
+
+			throw error;
+
+		}
+
+		const assetManager =
+			createAssetLoadingManager();
+
+		const loader =
+			await createGLTFLoader(
+				assetManager.manager
+			);
+
+		let contents;
+
+		if ( extension === 'glb' ) {
+
+			contents =
+				bytes.buffer.slice(
+					bytes.byteOffset,
+					bytes.byteOffset +
+					bytes.byteLength
+				);
+
+		} else {
+
+			contents =
+				new TextDecoder(
+					'utf-8'
+				).decode(
+					bytes
+				);
+
+		}
+
+		try {
+
+			const result =
+				await new Promise(
+					( resolve, reject ) => {
+
+						loader.parse(
+							contents,
+							'',
+							resolve,
+							reject
+						);
+
+					}
+				);
+
+			const object =
+				result.scene;
+
+			if ( ! object ) {
+
+				const error =
+					new Error(
+						'3EXR model asset did not produce a scene.'
+					);
+
+				error.code =
+					'MODEL_SCENE_MISSING';
+
+				throw error;
+
+			}
+
+			object.name =
+				asset.name;
+
+			object.animations.push(
+				... result.animations
+			);
+
+			linkGLTFTextures(
+				result,
+				assetId
+			);
+
+			editor.assetStore.linkObject(
+				object,
+				assetId
+			);
+
+			console.log(
+				'3EXR Loader:',
+				'loaded model asset',
+				asset.name,
+				'->',
+				assetId
+			);
+
+			return object;
+
+		} finally {
+
+			if ( loader.dracoLoader ) {
+
+				loader.dracoLoader.dispose();
+
+			}
+
+			if ( loader.ktx2Loader ) {
+
+				loader.ktx2Loader.dispose();
+
+			}
+
+			assetManager.release();
+
+		}
+
+	}
+
 	this.loadFile = function ( file, manager, assetId = null ) {
 
 		const filename = file.name;
