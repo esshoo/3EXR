@@ -1,9 +1,11 @@
 import { UIPanel, UIRow, UIHorizontalRule } from './libs/ui.js';
+import { ProjectIO } from './ProjectIO.js';
 import { FileLoader, PropertyBinding } from 'three';
 
 function MenubarFile( editor ) {
 
 	const strings = editor.strings;
+	const projectIO = new ProjectIO( editor );
 
 	const saveArrayBuffer = editor.utils.saveArrayBuffer;
 	const saveString = editor.utils.saveString;
@@ -50,6 +52,7 @@ function MenubarFile( editor ) {
 		if ( confirm( strings.getKey( 'prompt/file/open' ) ) ) {
 
 			editor.clear();
+			projectIO.reset();
 
 		}
 
@@ -88,6 +91,7 @@ function MenubarFile( editor ) {
 					loader.load( 'examples/' + example.file, function ( text ) {
 
 						editor.clear();
+						projectIO.reset();
 						editor.fromJSON( JSON.parse( text ) );
 
 					} );
@@ -101,7 +105,105 @@ function MenubarFile( editor ) {
 
 	}
 
-	// Open
+
+	// Open 3EXR Project
+
+	option = new UIRow()
+		.addClass( 'option' )
+		.setTextContent( strings.getKey( 'menubar/file/open3exr' ) )
+		.onClick( async function () {
+
+			if (
+				confirm(
+					strings.getKey( 'prompt/file/open' )
+				) === false
+			) {
+
+				return;
+
+			}
+
+			try {
+
+				await projectIO.open();
+
+			} catch ( error ) {
+
+				alert(
+					strings.getKey(
+						'prompt/file/failedToOpenProject'
+					)
+				);
+
+				console.error( error );
+
+			}
+
+		} );
+
+	options.add( option );
+
+	// Save 3EXR Project
+
+	option = new UIRow()
+		.addClass( 'option' )
+		.setTextContent( strings.getKey( 'menubar/file/save3exr' ) )
+		.onClick( async function () {
+
+			try {
+
+				await projectIO.save();
+
+			} catch ( error ) {
+
+				alert(
+					strings.getKey(
+						'prompt/file/failedToSaveProject'
+					)
+				);
+
+				console.error( error );
+
+			}
+
+		} );
+
+	options.add( option );
+
+	// Save 3EXR Project As
+
+	option = new UIRow()
+		.addClass( 'option' )
+		.setTextContent(
+			strings.getKey(
+				'menubar/file/save3exrAs'
+			)
+		)
+		.onClick( async function () {
+
+			try {
+
+				await projectIO.saveAs();
+
+			} catch ( error ) {
+
+				alert(
+					strings.getKey(
+						'prompt/file/failedToSaveProject'
+					)
+				);
+
+				console.error( error );
+
+			}
+
+		} );
+
+	options.add( option );
+
+	options.add( new UIHorizontalRule() );
+
+	// Open Legacy JSON
 
 	const openProjectForm = document.createElement( 'form' );
 	openProjectForm.style.display = 'none';
@@ -132,6 +234,7 @@ function MenubarFile( editor ) {
 			editor.signals.editorCleared.add( onEditorCleared );
 
 			editor.clear();
+			projectIO.reset();
 
 		} catch ( e ) {
 
@@ -140,7 +243,7 @@ function MenubarFile( editor ) {
 
 		} finally {
 
-			form.reset();
+			openProjectForm.reset();
 
 		}
 
@@ -150,7 +253,7 @@ function MenubarFile( editor ) {
 
 	option = new UIRow()
 		.addClass( 'option' )
-		.setTextContent( strings.getKey( 'menubar/file/open' ) )
+		.setTextContent( strings.getKey( 'menubar/file/openLegacy' ) )
 		.onClick( function () {
 
 			if ( confirm( strings.getKey( 'prompt/file/open' ) ) ) {
@@ -163,11 +266,11 @@ function MenubarFile( editor ) {
 
 	options.add( option );
 
-	// Save
+	// Save Legacy JSON
 
 	option = new UIRow()
 		.addClass( 'option' )
-		.setTextContent( strings.getKey( 'menubar/file/save' ) )
+		.setTextContent( strings.getKey( 'menubar/file/saveLegacy' ) )
 		.onClick( function () {
 
 			const json = editor.toJSON();
@@ -191,9 +294,12 @@ function MenubarFile( editor ) {
 	const fileInput = document.createElement( 'input' );
 	fileInput.multiple = true;
 	fileInput.type = 'file';
-	fileInput.addEventListener( 'change', function () {
+	fileInput.addEventListener( 'change', async function () {
 
-		editor.loader.loadFiles( fileInput.files );
+		const files = Array.from( fileInput.files );
+
+		await editor.loader.loadFiles( files );
+
 		form.reset();
 
 	} );

@@ -27,11 +27,21 @@ function Loader( editor ) {
 
 	};
 
-	this.loadFiles = function ( files, filesMap ) {
+	this.loadFiles = async function ( files, filesMap ) {
 
 		if ( files.length > 0 ) {
 
 			filesMap = filesMap || LoaderUtils.createFilesMap( files );
+
+			try {
+
+				await editor.assetStore.registerFiles( files, filesMap );
+
+			} catch ( error ) {
+
+				console.warn( '3EXR AssetStore: unable to register imported files.', error );
+
+			}
 
 			const normalizeLookupPath = function ( path ) {
 

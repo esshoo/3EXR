@@ -6,6 +6,7 @@ function Strings( config ) {
 		ar: {
 			'prompt/file/open': 'سيتم فقدان جميع التغييرات غير المحفوظة. هل أنت متأكد؟',
 			'prompt/file/failedToOpenProject': 'حدث خطأ أثناء فتح المشروع',
+			'prompt/file/failedToSaveProject': 'حدث خطأ أثناء حفظ المشروع',
 			'prompt/file/export/noMeshSelected': 'لم يتم تحديد أي مجسم Mesh',
 			'prompt/file/export/noObjectSelected': 'لم يتم تحديد أي عنصر',
 			'prompt/file/export/duplicateNames': 'بعض العناصر تحمل الاسم نفسه. سيتم تغيير أسمائها لضمان أسماء فريدة. هل تريد المتابعة؟',
@@ -50,6 +51,11 @@ function Strings( config ) {
 			'menubar/file/new/Shaders': 'Shaders',
 			'menubar/file/open': 'فتح',
 			'menubar/file/save': 'حفظ',
+			'menubar/file/open3exr': 'فتح مشروع 3EXR',
+			'menubar/file/save3exr': 'حفظ مشروع 3EXR',
+			'menubar/file/save3exrAs': 'حفظ مشروع 3EXR باسم...',
+			'menubar/file/openLegacy': 'فتح مشروع JSON قديم',
+			'menubar/file/saveLegacy': 'حفظ مشروع JSON قديم',
 			'menubar/file/import': 'استيراد',
 			'menubar/file/export': 'تصدير',
 
@@ -885,6 +891,7 @@ function Strings( config ) {
 
 			'prompt/file/open': 'Any unsaved data will be lost. Are you sure?',
 			'prompt/file/failedToOpenProject': 'Failed to open project!',
+			'prompt/file/failedToSaveProject': 'Failed to save project!',
 			'prompt/file/export/noMeshSelected': 'No Mesh selected!',
 			'prompt/file/export/noObjectSelected': 'No Object selected!',
 			'prompt/file/export/duplicateNames': 'Some objects share the same name. They will be renamed to ensure unique names. Are you sure?',
@@ -929,6 +936,11 @@ function Strings( config ) {
 			'menubar/file/new/Shaders': 'Shaders',
 			'menubar/file/open': 'Open',
 			'menubar/file/save': 'Save',
+			'menubar/file/open3exr': 'Open 3EXR Project',
+			'menubar/file/save3exr': 'Save 3EXR Project',
+			'menubar/file/save3exrAs': 'Save 3EXR Project As...',
+			'menubar/file/openLegacy': 'Open Legacy JSON Project',
+			'menubar/file/saveLegacy': 'Save Legacy JSON Project',
 			'menubar/file/import': 'Import',
 			'menubar/file/export': 'Export',
 
